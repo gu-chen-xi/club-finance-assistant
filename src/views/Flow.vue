@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { getDb } from "../api/db";
 import { getSettings } from "../api/settings";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { healthStore, type HealthItem } from "../api/health";
 import {
   listInvoices, addInvoice, deleteInvoice, updateInvoice, type Invoice,
   listVouchers, addVoucher, deleteVoucher, type Voucher,
@@ -212,6 +213,70 @@ async function saveCurrent() {
   await saveStep();
   alert("本步已保存");
 }
+
+// ===== 体检面板 =====
+const healthItems = computed<HealthItem[]>(() => {
+  const items: HealthItem[] = [];
+  if (!activity.value) return items;
+
+  // Step1
+  if (!activity.value.name) items.push({ level: "error", text: "活动名为空", step: 1 });
+  if (!activity.value.date) items.push({ level: "error", text: "活动日期未选", step: 1 });
+  if (!activity.value.plan_file_path) items.push({ level: "warning", text: "未上传活动策划书", step: 1 });
+  if (activity.value.name && activity.value.date && activity.value.plan_file_path)
+    items.push({ level: "ok", text: "活动策划齐全" });
+
+  // Step2
+  if (purchaseItems.value.length === 0) items.push({ level: "error", text: "采购清单为空", step: 2 });
+  else if (purchaseItems.value.every((r) => r.name && r.quantity && r.unit_price))
+    items.push({ level: "ok", text: `采购清单 ${purchaseItems.value.length} 项` });
+
+  // Step3
+  if (invoices.value.length === 0) items.push({ level: "error", text: "未上传发票", step: 3 });
+  else {
+    const unchecked = invoices.value.filter((i) => !i.headChecked);
+    if (unchecked.length > 0) items.push({ level: "warning", text: `${unchecked.length} 张发票未核对抬头`, step: 3 });
+    const noAmount = invoices.value.filter((i) => !i.amountCent);
+    if (noAmount.length > 0) items.push({ level: "warning", text: `${noAmount.length} 张发票未填金额`, step: 3 });
+    if (invoices.value.every((i) => i.headChecked && i.amountCent))
+      items.push({ level: "ok", text: `发票 ${invoices.value.length} 张，合计 ¥${(invoiceTotal.value/100).toFixed(2)}` });
+  }
+
+  // Step4
+  const expenseVouchers = vouchers.value.filter((v) => !v.isRefund);
+  if (expenseVouchers.length === 0) items.push({ level: "error", text: "未上传消费凭证", step: 4 });
+  else if (voucherTotal.value < invoiceTotal.value && invoiceTotal.value > 0)
+    items.push({ level: "error", text: `凭证支出 ¥${(voucherTotal.value/100).toFixed(2)} 少于发票 ¥${(invoiceTotal.value/100).toFixed(2)}`, step: 4 });
+  else items.push({ level: "ok", text: `凭证 ${expenseVouchers.length} 张` });
+
+  // Step5
+  const receiptFiles = receipts.value.filter((r) => r.type === "receipt");
+  const acceptanceFiles = receipts.value.filter((r) => r.type === "acceptance");
+  if (receiptFiles.length === 0 && acceptanceFiles.length === 0)
+    items.push({ level: "error", text: "未上传领取表或验收单", step: 5 });
+  for (const r of acceptanceFiles) {
+    const expected = (r.quantity || 0) * (r.unit_price_cent || 0);
+    if (r.total_price_cent !== expected)
+      items.push({ level: "error", text: `验收单总价≠数量×单价`, step: 5 });
+    if (!r.handler_signed || !r.acceptor_signed || !r.leader_signed)
+      items.push({ level: "warning", text: `验收单签字未齐`, step: 5 });
+  }
+  if (receiptFiles.length > 0) items.push({ level: "ok", text: `领取表 ${receiptFiles.length} 张` });
+  if (acceptanceFiles.length > 0 && acceptanceFiles.every((r) => r.handler_signed && r.acceptor_signed && r.leader_signed))
+    items.push({ level: "ok", text: `验收单 ${acceptanceFiles.length} 份，签字齐全` });
+
+  // Step6
+  if (nonCardApplicable.value && nonCardFiles.value.length === 0)
+    items.push({ level: "error", text: "非公务卡适用但未上传审批表", step: 6 });
+  else if (!nonCardApplicable.value)
+    items.push({ level: "ok", text: "非公务卡：不适用，已跳过" });
+  else
+    items.push({ level: "ok", text: `非公务卡审批表 ${nonCardFiles.value.length} 份` });
+
+  return items;
+});
+
+watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: true });
 </script>
 
 <template>
