@@ -43,6 +43,12 @@ pub fn run() {
             sql: include_str!("../migrations/002_plan_file.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "custom templates",
+            sql: include_str!("../migrations/003_custom_templates.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
