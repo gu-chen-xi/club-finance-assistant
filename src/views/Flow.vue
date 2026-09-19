@@ -322,7 +322,14 @@ async function saveStep() {
   await db.execute("UPDATE activities SET current_step = ? WHERE id = ?", [step.value, activityId]);
 }
 
-async function next() { await saveStep(); if (step.value < 10) step.value++; }
+async function next() {
+  if (step.value === 9 && !activity.value.paper_submitted) {
+    alert("请先勾选'已交到指定位置'后再进入下一步");
+    return;
+  }
+  await saveStep();
+  if (step.value < 10) step.value++;
+}
 async function prev() { await saveStep(); if (step.value > 1) step.value--; }
 
 async function pickFile() {
@@ -723,7 +730,7 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
 
     <div class="flex justify-between mt-4">
       <button @click="prev" :disabled="step <= 1" class="px-4 py-2 border rounded disabled:opacity-30">← 上一步</button>
-      <button @click="saveCurrent" class="px-4 py-2 bg-green-600 text-white rounded">💾 保存本步</button>
+      <button v-if="step <= 6" @click="saveCurrent" class="px-4 py-2 bg-green-600 text-white rounded">💾 保存本步</button>
       <button @click="next" :disabled="step >= 10" class="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-30">下一步 →</button>
     </div>
   </div>
