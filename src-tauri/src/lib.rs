@@ -19,6 +19,15 @@ fn ensure_dir(path: String) -> Result<(), String> {
     fs::create_dir_all(&path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    std::process::Command::new("cmd")
+        .args(&["/c", "start", "", &path])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let migrations = vec![
@@ -43,7 +52,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![copy_files, ensure_dir])
+        .invoke_handler(tauri::generate_handler![copy_files, ensure_dir, open_file])
         .setup(|app| {
             let _ = app;
             Ok(())
