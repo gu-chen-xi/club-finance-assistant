@@ -5,6 +5,7 @@ const routes = [
   { path: "/", redirect: "/dashboard" },
   { path: "/dashboard", name: "dashboard", component: () => import("../views/Dashboard.vue"), meta: { title: "工作台" } },
   { path: "/activities", name: "activities", component: () => import("../views/Activities.vue"), meta: { title: "活动报账" } },
+  { path: "/activities/:id", name: "activity-flow", component: () => import("../views/Flow.vue"), meta: { title: "活动流水线" } },
   { path: "/ledger", name: "ledger", component: () => import("../views/Ledger.vue"), meta: { title: "总账" } },
   { path: "/tracking", name: "tracking", component: () => import("../views/Tracking.vue"), meta: { title: "报销跟踪" } },
   { path: "/templates", name: "templates", component: () => import("../views/Templates.vue"), meta: { title: "模板库" } },

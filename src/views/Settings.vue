@@ -1,20 +1,42 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import { getSettings, saveSettings } from "../api/settings";
 
 const clubName = ref("");
 const teacherName = ref("");
 const cardLastFour = ref("");
 const schoolTaxNo = ref("");
 const submitLocation = ref("");
-const initialBalance = ref(0);
+const initialBalanceYuan = ref(0); // 显示用元
 const saved = ref(false);
+const loading = ref(true);
+const error = ref("");
 
 onMounted(async () => {
-  // TODO Batch 1: 从 SQLite 读 settings
+  try {
+    const s = await getSettings();
+    clubName.value = s.clubName;
+    teacherName.value = s.teacherName;
+    cardLastFour.value = s.cardLastFour;
+    schoolTaxNo.value = s.schoolTaxNo;
+    submitLocation.value = s.submitLocation;
+    initialBalanceYuan.value = s.initialBalance / 100;
+  } catch (e: any) {
+    error.value = String(e?.message || e);
+  } finally {
+    loading.value = false;
+  }
 });
 
 async function save() {
-  // TODO Batch 1: 写回 SQLite
+  await saveSettings({
+    clubName: clubName.value.trim(),
+    teacherName: teacherName.value.trim(),
+    cardLastFour: cardLastFour.value.trim(),
+    schoolTaxNo: schoolTaxNo.value.trim(),
+    submitLocation: submitLocation.value.trim(),
+    initialBalance: Math.round(initialBalanceYuan.value * 100), // 元 → 分
+  });
   saved.value = true;
   setTimeout(() => (saved.value = false), 2000);
 }
@@ -23,7 +45,11 @@ async function save() {
 <template>
   <div class="p-6 max-w-2xl">
     <h1 class="text-2xl font-bold mb-4">设置</h1>
-    <div class="space-y-4 bg-white p-6 rounded shadow">
+    <div v-if="loading" class="text-gray-400">加载中...</div>
+    <div v-else-if="error" class="bg-red-50 border border-red-300 text-red-700 p-4 rounded">
+      <b>错误：</b>{{ error }}
+    </div>
+    <div v-else class="space-y-4 bg-white p-6 rounded shadow">
       <label class="block">
         <span class="text-sm text-gray-600">社团名称</span>
         <input v-model="clubName" class="mt-1 block w-full border rounded px-3 py-2" placeholder="如：青年网络思行社" />
@@ -46,7 +72,7 @@ async function save() {
       </label>
       <label class="block">
         <span class="text-sm text-gray-600">初始余额（元）</span>
-        <input v-model.number="initialBalance" type="number" class="mt-1 block w-full border rounded px-3 py-2" />
+        <input v-model.number="initialBalanceYuan" type="number" step="0.01" class="mt-1 block w-full border rounded px-3 py-2" />
       </label>
       <button @click="save" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
         {{ saved ? "已保存 ✓" : "保存" }}

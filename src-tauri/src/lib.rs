@@ -1,10 +1,23 @@
+use tauri_plugin_sql::{Migration, MigrationKind};
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let migrations = vec![Migration {
+        version: 1,
+        description: "create initial tables",
+        sql: include_str!("../migrations/001_init.sql"),
+        kind: MigrationKind::Up,
+    }];
+
     tauri::Builder::default()
-        // SQLite 插件，P1 业务表在首次启动时由迁移脚本建
-        .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations("sqlite:app.db", migrations)
+                .build(),
+        )
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let _ = app; // 占位，Batch 1 在这里做 DB 初始化
+            let _ = app;
             Ok(())
         })
         .run(tauri::generate_context!())
