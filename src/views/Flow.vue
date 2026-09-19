@@ -242,6 +242,32 @@ async function generatePackage() {
   }
 }
 
+// Step8: 电子审核状态流转
+const rejectReason = ref("");
+async function changeReviewStatus(newStatus: string) {
+  const db = await getDb();
+  let reason = "";
+  if (newStatus === "rejected") {
+    reason = prompt("请输入退回原因：") || "";
+    if (!reason) return;
+  }
+  await db.execute("UPDATE activities SET review_status = ?, review_reject_reason = ? WHERE id = ?", [newStatus, reason, activityId]);
+  activity.value.review_status = newStatus;
+  activity.value.review_reject_reason = reason;
+}
+
+// Step10: 归档
+async function archiveActivity() {
+  const actualCost = invoiceTotal.value - refundTotal.value;
+  const db = await getDb();
+  await db.execute(
+    "UPDATE activities SET archived = 1, actual_cost = ? WHERE id = ?",
+    [actualCost, activityId]
+  );
+  activity.value.archived = 1;
+  activity.value.actual_cost = actualCost;
+}
+
 async function saveStep() {
   const db = await getDb();
   if (step.value === 1) {
@@ -589,10 +615,109 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
         <div v-if="genLog" class="mt-4 p-3 bg-gray-50 rounded text-sm whitespace-pre-wrap font-mono">{{ genLog }}</div>
       </div>
 
-      <!-- Step 8~10 占位 -->
-      <div v-else>
-        <h2 class="text-lg font-bold mb-3">Step {{ step }}：{{ STEPS[step - 1] }}</h2>
-        <p class="text-gray-400">此步骤界面将在下一轮实现</p>
+      <!-- Step 8: 电子审核 -->
+      <div v-else-if="step === 8">
+        <h2 class="text-lg font-bold mb-3">Step 8：电子审核</h2>
+        <p class="text-sm text-gray-500 mb-4">电子包提交给"社团管理部财务部"审核，通过后才能打印纸质版。</p>
+
+        <div class="border rounded p-4 mb-4">
+          <div class="text-sm text-gray-500 mb-2">当前状态：</div>
+          <div class="text-lg font-bold" :class="{
+            'text-gray-400': activity.review_status === 'pending',
+            'text-purple-600': activity.review_status === 'submitted',
+            'text-blue-600': activity.review_status === 'reviewing',
+            'text-amber-600': activity.review_status === 'approved',
+            'text-red-600': activity.review_status === 'rejected',
+          }">
+            {{ { pending: '待提交', submitted: '已提交社管财务部', reviewing: '审核中', approved: '✅ 已通过', rejected: '❌ 已退回' }[activity.review_status] || activity.review_status }}
+          </div>
+          <div v-if="activity.review_status === 'rejected' && activity.review_reject_reason" class="mt-2 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            退回原因：{{ activity.review_reject_reason }}
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <button v-if="activity.review_status === 'pending' || activity.review_status === 'submitted'" @click="changeReviewStatus('submitted')" class="w-full px-4 py-2 bg-purple-600 text-white rounded">
+            📤 提交到社管财务部
+          </button>
+          <button v-if="activity.review_status === 'submitted'" @click="changeReviewStatus('reviewing')" class="w-full px-4 py-2 bg-blue-600 text-white rounded">
+            🔄 标记为审核中
+          </button>
+          <template v-if="activity.review_status === 'reviewing'">
+            <button @click="changeReviewStatus('approved')" class="w-full px-4 py-2 bg-green-600 text-white rounded">
+              ✅ 审核通过
+            </button>
+            <button @click="changeReviewStatus('rejected')" class="w-full px-4 py-2 bg-red-600 text-white rounded">
+              ❌ 审核退回
+            </button>
+          </template>
+          <button v-if="activity.review_status === 'rejected'" @click="changeReviewStatus('submitted')" class="w-full px-4 py-2 bg-purple-600 text-white rounded">
+            📤 修改后重新提交
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 9: 纸质提交 -->
+      <div v-else-if="step === 9">
+        <h2 class="text-lg font-bold mb-3">Step 9：纸质提交</h2>
+        <div v-if="activity.review_status !== 'approved'" class="mb-4 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
+          ⚠️ 电子审核尚未通过，请先在 Step 8 审核通过后再提交纸质版。
+        </div>
+        <p class="text-sm text-gray-500 mb-4">审核通过后，打印纸质版并签字，然后交到指定位置。</p>
+
+        <div class="border rounded p-4 mb-4">
+          <div class="text-sm font-semibold mb-2">📋 纸质材料清单：</div>
+          <ul class="text-sm space-y-1 list-disc list-inside text-gray-700">
+            <li>活动策划书（纸质 2 份，需签字）</li>
+            <li>发票原件（{{ invoices.length }} 张）</li>
+            <li>消费凭证截图（{{ vouchers.length }} 张）</li>
+            <li>领取表原件（{{ receipts.filter(r => r.type === 'receipt').length }} 张）</li>
+            <li>验收单（{{ receipts.filter(r => r.type === 'acceptance').length }} 份，需三方签字）</li>
+            <li v-if="nonCardApplicable">非公务卡审批表（一式两份）</li>
+          </ul>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm p-3 bg-green-50 border border-green-200 rounded cursor-pointer">
+          <input type="checkbox" :checked="!!activity.paper_submitted" @change="async (e) => {
+            const db = await getDb();
+            await db.execute('UPDATE activities SET paper_submitted = ? WHERE id = ?', [e.target.checked ? 1 : 0, activityId]);
+            activity.paper_submitted = e.target.checked ? 1 : 0;
+          }" />
+          <span>✅ 已交到 {{ settings?.submit_location || '303办公室社管柜子财务部那一格' }}</span>
+        </label>
+      </div>
+
+      <!-- Step 10: 归档 -->
+      <div v-else-if="step === 10">
+        <h2 class="text-lg font-bold mb-3">Step 10：归档</h2>
+
+        <div v-if="activity.archived" class="p-4 bg-green-50 border border-green-200 rounded text-center">
+          <div class="text-4xl mb-2">📦</div>
+          <div class="text-lg font-bold text-green-700">已归档</div>
+          <div class="text-sm text-gray-500 mt-2">本活动已归档到历史，总账已更新</div>
+        </div>
+
+        <template v-else>
+          <div class="border rounded p-4 mb-4">
+            <div class="text-sm font-semibold mb-2">📊 本次报账汇总：</div>
+            <div class="text-sm space-y-1">
+              <div>发票总额：¥{{ (invoiceTotal/100).toFixed(2) }}</div>
+              <div>退款总额：¥{{ (refundTotal/100).toFixed(2) }}</div>
+              <div class="font-bold border-t pt-1">实际支出：¥{{ ((invoiceTotal - refundTotal)/100).toFixed(2) }}</div>
+            </div>
+          </div>
+
+          <div v-if="activity.review_status !== 'approved'" class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
+            ⚠️ 电子审核尚未通过，无法归档。
+          </div>
+          <div v-if="!activity.paper_submitted" class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
+            ⚠️ 纸质材料尚未提交，请先在 Step 9 勾选确认。
+          </div>
+
+          <button @click="archiveActivity" :disabled="activity.review_status !== 'approved' || !activity.paper_submitted" class="w-full px-4 py-3 bg-gray-800 text-white rounded font-bold disabled:opacity-40">
+            📦 归档此活动
+          </button>
+        </template>
       </div>
     </div>
 
@@ -603,6 +728,9 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
     </div>
   </div>
 </template>
+
+
+
 
 
 
