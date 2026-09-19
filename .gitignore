@@ -1,0 +1,31 @@
+# Node
+node_modules/
+dist/
+*.log
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/gen/
+
+# 编辑器
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 运行时数据（本地数据库，不入库）
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# 用户上传的模板原件不入库（只保留构建时拷贝的）
+*.docx
+*.xlsx
