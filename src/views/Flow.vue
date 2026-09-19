@@ -1,10 +1,11 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { getDb } from "../api/db";
 import { getSettings } from "../api/settings";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { healthStore, type HealthItem } from "../api/health";
+import { invoke } from "@tauri-apps/api/core";
+import { healthStore, healthErrors, type HealthItem } from "../api/health";
 import {
   listInvoices, addInvoice, deleteInvoice, updateInvoice, type Invoice,
   listVouchers, addVoucher, deleteVoucher, type Voucher,
@@ -31,6 +32,10 @@ const receipts = ref<any[]>([]);
 // Step6: 非公务卡
 const nonCardApplicable = ref(false);
 const nonCardFiles = ref<string[]>([]);
+// Step7: 生成电子包
+const outputDir = ref("");
+const generating = ref(false);
+const genLog = ref("");
 
 onMounted(load);
 
@@ -143,6 +148,98 @@ async function pickNonCard() {
 }
 async function removeNonCardFile(idx: number) {
   nonCardFiles.value.splice(idx, 1);
+}
+
+// Step7: 选输出目录
+async function pickOutputDir() {
+  const selected = await openDialog({ directory: true, multiple: false });
+  if (selected) outputDir.value = selected as string;
+}
+
+// Step7: 生成电子包
+async function generatePackage() {
+  if (!outputDir.value) { alert("请先选择输出目录"); return; }
+  const redCount = healthErrors.value.length;
+  if (redCount > 0) {
+    if (!confirm(`还有 ${redCount} 个红项未解决，确定要生成吗？`)) return;
+  }
+  generating.value = true;
+  genLog.value = "开始生成...";
+
+  const club = settings.value?.clubName || "社团";
+  const teacher = settings.value?.teacherName || "老师";
+  const totalYuan = (invoiceTotal.value / 100).toFixed(2);
+  genLog.value = `社团=${club} 老师=${teacher} totalYuan=${totalYuan} invoiceTotal分=${invoiceTotal.value}`;
+  const topName = `${club}打给${teacher}${totalYuan}元`;
+  const topDir = `${outputDir.value}/${topName}`;
+
+  const tasks: [string, string][] = [];
+
+  // 发票目录
+  const invDir = `${topDir}/${invoices.value.length}张发票${totalYuan}元`;
+  invoices.value.forEach((inv, i) => {
+    const ext = inv.fileExt || "jpg";
+    const name = `${inv.itemName || "物品"}+${(inv.amountCent/100).toFixed(2)}.${ext}`;
+    tasks.push([inv.filePath, `${invDir}/${name}`]);
+  });
+
+  // 凭证目录
+  const expenseV = vouchers.value.filter(v => !v.isRefund);
+  const refundV = vouchers.value.filter(v => v.isRefund);
+  const vchTotal = (expenseV.reduce((s,v)=>s+v.amountCent,0)/100).toFixed(2);
+  const vchDir = `${topDir}/${expenseV.length}张消费凭证${vchTotal}元`;
+  expenseV.forEach((v, i) => {
+    tasks.push([v.filePath, `${vchDir}/消费凭证${(v.amountCent/100).toFixed(2)}.jpg`]);
+  });
+  refundV.forEach((v) => {
+    tasks.push([v.filePath, `${vchDir}/退款${(v.amountCent/100).toFixed(2)}.jpg`]);
+  });
+
+  // 领取表/验收单目录
+  const receiptFiles = receipts.value.filter(r => r.type === "receipt");
+  const acceptanceFiles = receipts.value.filter(r => r.type === "acceptance");
+  if (receiptFiles.length > 0) {
+    const rDir = `${topDir}/${receiptFiles.length}张领取表`;
+    receiptFiles.forEach((r, i) => {
+      tasks.push([r.file_path, `${rDir}/领取表${i+1}.jpg`]);
+    });
+  }
+  if (acceptanceFiles.length > 0) {
+    const aDir = `${topDir}/验收单`;
+    acceptanceFiles.forEach((r, i) => {
+      const ext = r.file_path.split('.').pop();
+      tasks.push([r.file_path, `${aDir}/${ext === 'docx' ? '电子验收单.docx' : `纸质验收单${i+1}.jpg`}`]);
+    });
+  }
+
+  // 活动策划目录
+  if (activity.value.plan_file_path) {
+    const pDir = `${topDir}/${activity.value.name}`;
+    const ext = activity.value.plan_file_path.split('.').pop();
+    tasks.push([activity.value.plan_file_path, `${pDir}/活动策划.${ext}`]);
+  }
+
+  // 非公务卡
+  if (nonCardApplicable.value && nonCardFiles.value.length > 0) {
+    const nDir = `${topDir}/非公务卡结算审批表`;
+    nonCardFiles.value.forEach((f, i) => {
+      tasks.push([f, `${nDir}/非公务卡结算特殊情况审批表${i+1}.pdf`]);
+    });
+  }
+
+  try {
+    genLog.value = `共 ${tasks.length} 个文件，开始复制...`;
+    await invoke("copy_files", { files: tasks });
+    genLog.value = `✅ 完成！\n社团=${club}\n老师=${teacher}\ntotalYuan=${totalYuan}\ninvoiceTotal分=${invoiceTotal.value}\n已生成到：${topDir}`;
+    // 更新活动状态
+    const db = await getDb();
+    await db.execute("UPDATE activities SET review_status = 'submitted', folder_path = ? WHERE id = ?", [topDir, activityId]);
+    activity.value.review_status = "submitted";
+  } catch (e: any) {
+    genLog.value = `❌ 失败：${e}`;
+  } finally {
+    generating.value = false;
+  }
 }
 
 async function saveStep() {
@@ -468,7 +565,31 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
         </div>
       </div>
 
-      <!-- Step 7~10 占位 -->
+      <!-- Step 7: 生成电子包 -->
+      <div v-else-if="step === 7">
+        <h2 class="text-lg font-bold mb-3">Step 7：生成电子包</h2>
+        <p class="text-sm text-gray-500 mb-4">按学校规则自动创建文件夹结构并复制重命名文件。</p>
+
+        <div class="mb-4">
+          <label class="text-sm text-gray-600 block mb-1">输出目录</label>
+          <div class="flex gap-2">
+            <input :value="outputDir" readonly class="flex-1 border rounded px-3 py-2 text-sm bg-gray-50" placeholder="选择一个空文件夹" />
+            <button @click="pickOutputDir" class="px-4 py-2 border rounded">浏览...</button>
+          </div>
+        </div>
+
+        <div v-if="healthErrors.length > 0" class="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          ⚠️ 还有 {{ healthErrors.length }} 个红项未解决，建议先解决再生成。
+        </div>
+
+        <button @click="generatePackage" :disabled="generating" class="px-6 py-3 bg-amber-500 text-white rounded font-bold disabled:opacity-50">
+          {{ generating ? "生成中..." : "🚀 开始生成" }}
+        </button>
+
+        <div v-if="genLog" class="mt-4 p-3 bg-gray-50 rounded text-sm whitespace-pre-wrap font-mono">{{ genLog }}</div>
+      </div>
+
+      <!-- Step 8~10 占位 -->
       <div v-else>
         <h2 class="text-lg font-bold mb-3">Step {{ step }}：{{ STEPS[step - 1] }}</h2>
         <p class="text-gray-400">此步骤界面将在下一轮实现</p>
@@ -482,3 +603,9 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
     </div>
   </div>
 </template>
+
+
+
+
+
+
