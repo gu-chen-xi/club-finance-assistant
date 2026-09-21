@@ -23,7 +23,8 @@ const builtinTemplates = [
   },
 ];
 
-const basePath = "D:\\project\\社团财务软件项目\\开发期使用的东西\\";
+const basePath = "D:\\project\\社团财务软件项目\\模板\\内置模板\\";
+const customDir = "D:\\project\\社团财务软件项目\\模板\\自定义模板\\";
 const desktopPath = "C:\\Users\\asus\\Desktop\\";
 
 const customTemplates = ref<any[]>([]);
@@ -51,12 +52,22 @@ async function addTemplate() {
   if (!selected) return;
   const name = prompt("给这个模板起个名字：", (selected as string).split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "自定义模板");
   if (!name) return;
+  // 复制到"模板/自定义模板"文件夹（不会改动内置模板）
+  const ext = (selected as string).split(".").pop() || "";
+  const dst = `${customDir}${name}.${ext}`;
+  try {
+    await invoke("copy_files", { files: [[selected as string, dst]] });
+  } catch (e) {
+    alert("添加失败：" + e);
+    return;
+  }
   const db = await getDb();
   await db.execute(
     "INSERT INTO custom_templates (id, name, file_path, created_at) VALUES (?, ?, ?, ?)",
-    [`tpl-${Date.now()}`, name, selected as string, new Date().toISOString()]
+    [`tpl-${Date.now()}`, name, dst, new Date().toISOString()]
   );
   await loadCustom();
+  alert(`已添加到自定义模板：${name}.${ext}`);
 }
 
 async function removeTemplate(id: string) {
