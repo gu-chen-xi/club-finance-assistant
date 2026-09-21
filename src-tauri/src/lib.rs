@@ -28,6 +28,17 @@ fn open_file(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn delete_files(paths: Vec<String>) -> Result<(), String> {
+    for p in &paths {
+        let path = Path::new(p);
+        if path.is_file() {
+            fs::remove_file(path).map_err(|e| format!("删除失败 {}: {}", p, e))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let migrations = vec![
@@ -58,7 +69,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![copy_files, ensure_dir, open_file])
+        .invoke_handler(tauri::generate_handler![copy_files, ensure_dir, open_file, delete_files])
         .setup(|app| {
             let _ = app;
             Ok(())
