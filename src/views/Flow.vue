@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { getDb } from "../api/db";
@@ -368,16 +368,38 @@ const healthItems = computed<HealthItem[]>(() => {
     if (unchecked.length > 0) items.push({ level: "warning", text: `${unchecked.length} 张发票未核对抬头`, step: 3 });
     const noAmount = invoices.value.filter((i) => !i.amountCent);
     if (noAmount.length > 0) items.push({ level: "warning", text: `${noAmount.length} 张发票未填金额`, step: 3 });
-    if (invoices.value.every((i) => i.headChecked && i.amountCent))
-      items.push({ level: "ok", text: `发票 ${invoices.value.length} 张，合计 ¥${(invoiceTotal.value/100).toFixed(2)}` });
+    // 独立数量统计，用于报账包文件夹名
+    items.push({ level: "ok", text: `📄 ${invoices.value.length} 张发票，共 ¥${(invoiceTotal.value/100).toFixed(2)}` });
   }
 
-  // Step4
+  // Step4 金额容差校验（分做整数比对，容差 ±10 分）
   const expenseVouchers = vouchers.value.filter((v) => !v.isRefund);
   if (expenseVouchers.length === 0) items.push({ level: "error", text: "未上传消费凭证", step: 4 });
-  else if (voucherTotal.value < invoiceTotal.value && invoiceTotal.value > 0)
-    items.push({ level: "error", text: `凭证支出 ¥${(voucherTotal.value/100).toFixed(2)} 少于发票 ¥${(invoiceTotal.value/100).toFixed(2)}`, step: 4 });
-  else items.push({ level: "ok", text: `凭证 ${expenseVouchers.length} 张` });
+  else {
+    const invTotal = invoiceTotal.value;      // 发票合计（分）
+    const vchTotal = voucherTotal.value;      // 凭证支出合计（分）
+    const diff = invTotal - vchTotal;         // >0: 凭证不足；<0: 凭证超出
+    const diffAbs = Math.abs(diff);
+
+    // 独立数量统计，用于报账包文件夹名
+    items.push({ level: "ok", text: `🧾 ${expenseVouchers.length} 张凭证，共 ¥${(vchTotal/100).toFixed(2)}` });
+
+    if (invTotal <= 0) {
+      // 发票金额还没填全，先不做金额比对
+    } else if (diffAbs <= 10) {
+      if (diff === 0) {
+        items.push({ level: "ok", text: "✅ 金额校验通过" });
+      } else {
+        items.push({ level: "ok-note", text: `✅ 金额校验通过（存在 ${diffAbs} 分微小差额，请注意核验支付平台满减或抹零）` });
+      }
+    } else if (diff > 10) {
+      // 凭证支出 < 发票，差 > 0.1 元 → 红项阻断
+      items.push({ level: "error", text: `凭证总金额（¥${(vchTotal/100).toFixed(2)}）与发票总金额（¥${(invTotal/100).toFixed(2)}）不符，差额超出0.1元容差范围`, step: 4 });
+    } else {
+      // 凭证支出 > 发票，差 > 0.1 元 → 黄项警告
+      items.push({ level: "warning", text: `凭证总金额（¥${(vchTotal/100).toFixed(2)}）与发票总金额（¥${(invTotal/100).toFixed(2)}）不符，差额超出0.1元容差范围`, step: 4 });
+    }
+  }
 
   // Step5
   const receiptFiles = receipts.value.filter((r) => r.type === "receipt");
@@ -735,6 +757,7 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
     </div>
   </div>
 </template>
+
 
 
 

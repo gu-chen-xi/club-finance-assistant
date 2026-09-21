@@ -1,7 +1,7 @@
 import { reactive, computed } from "vue";
 
 export interface HealthItem {
-  level: "error" | "warning" | "ok";
+  level: "error" | "warning" | "ok" | "ok-note";
   text: string;
   step?: number; // 点击跳转的步骤
 }
@@ -17,3 +17,4 @@ export const healthStore = reactive({
 export const healthErrors = computed(() => healthStore.items.filter((i) => i.level === "error"));
 export const healthWarnings = computed(() => healthStore.items.filter((i) => i.level === "warning"));
 export const healthOks = computed(() => healthStore.items.filter((i) => i.level === "ok"));
+export const healthOkNotes = computed(() => healthStore.items.filter((i) => i.level === "ok-note"));

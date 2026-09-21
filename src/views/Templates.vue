@@ -23,7 +23,7 @@ const builtinTemplates = [
   },
 ];
 
-const basePath = "D:\\project\\社团财务软件项目\\";
+const basePath = "D:\\project\\社团财务软件项目\\开发期使用的东西\\";
 const desktopPath = "C:\\Users\\asus\\Desktop\\";
 
 const customTemplates = ref<any[]>([]);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from "vue-router";
 import { computed } from "vue";
-import { healthStore, healthErrors, healthWarnings, healthOks } from "./api/health";
+import { healthStore, healthErrors, healthWarnings, healthOks, healthOkNotes } from "./api/health";
 
 const route = useRoute();
 const router = useRouter();
@@ -76,6 +76,13 @@ function jump(step?: number) {
             @click="jump(item.step)"
             class="block w-full text-left text-sm py-1 px-2 rounded hover:bg-amber-50 text-amber-700"
           >{{ item.text }}</button>
+        </div>
+        <!-- 深绿色提醒（金额微小差额等，通过但需留意） -->
+        <div v-if="healthOkNotes.length">
+          <div class="text-xs font-semibold text-emerald-700 mb-1">✅ 已通过（有提醒）</div>
+          <div v-for="(item, i) in healthOkNotes" :key="'n'+i" class="text-sm py-1 px-2 rounded bg-emerald-50 text-emerald-800">
+            {{ item.text }}
+          </div>
         </div>
         <!-- 已齐全 -->
         <div v-if="healthOks.length">
