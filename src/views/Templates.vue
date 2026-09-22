@@ -2,6 +2,7 @@
 import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { appDataDir, desktopDir } from "@tauri-apps/api/path";
 import { getDb } from "../api/db";
 
 // 内置模板（开发阶段指向项目根目录，打包后改为资源目录）
@@ -23,9 +24,28 @@ const builtinTemplates = [
   },
 ];
 
-const basePath = "D:\\project\\社团财务软件项目\\模板\\内置模板\\";
-const customDir = "D:\\project\\社团财务软件项目\\模板\\自定义模板\\";
-const desktopPath = "C:\\Users\\asus\\Desktop\\";
+// 内置模板目录：运行时解析（开发=D盘项目目录，打包=安装包资源目录）
+async function getBasePath(): Promise<string> {
+  try {
+    const p = await invoke<string>("get_template_base");
+    if (p) return p.replace(/[\\/]+$/, "") + "\\";
+  } catch (e) {
+    console.warn("get_template_base failed:", e);
+  }
+  return "D:\\project\\社团财务软件项目\\模板\\内置模板\\";
+}
+
+// 自定义模板目录：软件数据目录（AppData）下的 custom_templates
+async function getCustomDir(): Promise<string> {
+  const dir = (await appDataDir()).replace(/[\\/]+$/, "") + "\\custom_templates\\";
+  await invoke("ensure_dir", { path: dir });
+  return dir;
+}
+
+// 当前用户真实桌面
+async function getDesktopPath(): Promise<string> {
+  return (await desktopDir()).replace(/[\\/]+$/, "") + "\\";
+}
 
 const customTemplates = ref<any[]>([]);
 
@@ -44,6 +64,14 @@ async function openTemplate(path: string) {
   }
 }
 
+// 内置模板：打开/导出前实时解析模板目录
+async function openBuiltin(file: string) {
+  openTemplate((await getBasePath()) + file);
+}
+async function exportBuiltin(file: string, name: string) {
+  exportToDesktop((await getBasePath()) + file, name);
+}
+
 async function addTemplate() {
   const selected = await openDialog({
     multiple: false,
@@ -52,7 +80,8 @@ async function addTemplate() {
   if (!selected) return;
   const name = prompt("给这个模板起个名字：", (selected as string).split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "自定义模板");
   if (!name) return;
-  // 复制到"模板/自定义模板"文件夹（不会改动内置模板）
+  // 复制到软件数据目录下的"自定义模板"文件夹（不会改动内置模板）
+  const customDir = await getCustomDir();
   const ext = (selected as string).split(".").pop() || "";
   const dst = `${customDir}${name}.${ext}`;
   try {
@@ -73,6 +102,7 @@ async function addTemplate() {
 async function removeTemplate(t: any) {
   if (!confirm(`确定删除模板「${t.name}」吗？\n（会同时删除「自定义模板」文件夹里的文件，不可恢复）`)) return;
   // 安全校验：只删除自定义模板目录内的文件，防止误删其他位置
+  const customDir = await getCustomDir();
   if (!t.file_path.startsWith(customDir)) {
     alert("该模板文件不在自定义模板目录内，跳过删除文件，仅删除记录");
   } else {
@@ -89,6 +119,7 @@ async function removeTemplate(t: any) {
 }
 
 async function exportToDesktop(filePath: string, name: string) {
+  const desktopPath = await getDesktopPath();
   const ext = filePath.split(".").pop();
   const dst = `${desktopPath}${name}.${ext}`;
   // 如果文件已在桌面，直接提示
@@ -120,8 +151,8 @@ async function exportToDesktop(filePath: string, name: string) {
         <div class="font-semibold">{{ t.name }}</div>
         <div class="text-xs text-gray-500 mt-1 mb-4">{{ t.desc }}</div>
         <div class="flex gap-2">
-          <button @click="openTemplate(basePath + t.file)" class="flex-1 px-3 py-2 bg-blue-600 text-white rounded text-sm">打开</button>
-          <button @click="exportToDesktop(basePath + t.file, t.name)" class="flex-1 px-3 py-2 border rounded text-sm">导出到桌面</button>
+          <button @click="openBuiltin(t.file)" class="flex-1 px-3 py-2 bg-blue-600 text-white rounded text-sm">打开</button>
+          <button @click="exportBuiltin(t.file, t.name)" class="flex-1 px-3 py-2 border rounded text-sm">导出到桌面</button>
         </div>
       </div>
     </div>
