@@ -83,6 +83,12 @@ pub fn run() {
             sql: include_str!("../migrations/003_custom_templates.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "acceptance confirmed",
+            sql: include_str!("../migrations/004_acceptance_confirmed.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

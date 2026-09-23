@@ -29,6 +29,8 @@ const settings = ref<any>(null);
 // Step5: 领取表/验收单
 const receiptTab = ref<"receipt" | "acceptance">("receipt");
 const receipts = ref<any[]>([]);
+// 验收单整体签字确认（替代原数量/单价/总价与三方签字）
+const acceptanceConfirmed = ref(false);
 // Step6: 非公务卡
 const nonCardApplicable = ref(false);
 const nonCardFiles = ref<string[]>([]);
@@ -54,6 +56,7 @@ async function load() {
   invoices.value = await listInvoices(activityId);
   vouchers.value = await listVouchers(activityId);
   receipts.value = await db.select("SELECT * FROM receipts WHERE activity_id = ? ORDER BY rowid", [activityId]);
+  acceptanceConfirmed.value = !!(receipts.value.find((r: any) => r.type === "acceptance")?.confirmed);
   const nc = await db.select("SELECT * FROM non_card WHERE activity_id = ?", [activityId]);
   if (nc.length > 0) {
     nonCardApplicable.value = !!nc[0].applicable;
@@ -138,6 +141,12 @@ async function removeReceipt(id: string) {
   const db = await getDb();
   await db.execute("DELETE FROM receipts WHERE id = ?", [id]);
   receipts.value = await db.select("SELECT * FROM receipts WHERE activity_id = ? ORDER BY rowid", [activityId]);
+}
+// 验收单显示名：docx → 电子验收单.docx；jpg → 纸质验收单N.jpg
+function acceptanceLabel(r: any) {
+  if (String(r.file_path).toLowerCase().endsWith(".docx")) return "电子验收单.docx";
+  const jpgs = receipts.value.filter((x) => x.type === "acceptance" && !String(x.file_path).toLowerCase().endsWith(".docx"));
+  return `纸质验收单${jpgs.indexOf(r) + 1}.jpg`;
 }
 
 // Step6: 非公务卡
@@ -296,21 +305,10 @@ async function saveStep() {
     }
   }
   if (step.value === 5) {
-    // 保存验收单的数量/单价/签字
+    // 保存验收单整体签字确认
     for (const r of receipts.value) {
       if (r.type !== "acceptance") continue;
-      await db.execute(
-        "UPDATE receipts SET total_price_cent = ?, quantity = ?, unit_price_cent = ?, handler_signed = ?, acceptor_signed = ?, leader_signed = ? WHERE id = ?",
-        [
-          (r.total_price_cent || 0),
-          (r.quantity || 0),
-          (r.unit_price_cent || 0),
-          r.handler_signed || 0,
-          r.acceptor_signed || 0,
-          r.leader_signed || 0,
-          r.id,
-        ]
-      );
+      await db.execute("UPDATE receipts SET confirmed = ? WHERE id = ?", [acceptanceConfirmed.value ? 1 : 0, r.id]);
     }
   }
   if (step.value === 6) {
@@ -406,16 +404,11 @@ const healthItems = computed<HealthItem[]>(() => {
   const acceptanceFiles = receipts.value.filter((r) => r.type === "acceptance");
   if (receiptFiles.length === 0 && acceptanceFiles.length === 0)
     items.push({ level: "error", text: "未上传领取表或验收单", step: 5 });
-  for (const r of acceptanceFiles) {
-    const expected = (r.quantity || 0) * (r.unit_price_cent || 0);
-    if (r.total_price_cent !== expected)
-      items.push({ level: "error", text: `验收单总价≠数量×单价`, step: 5 });
-    if (!r.handler_signed || !r.acceptor_signed || !r.leader_signed)
-      items.push({ level: "warning", text: `验收单签字未齐`, step: 5 });
-  }
+  if (acceptanceFiles.length > 0 && !acceptanceConfirmed.value)
+    items.push({ level: "warning", text: "验收单尚未确认签字完成（请手动打钩）", step: 5 });
   if (receiptFiles.length > 0) items.push({ level: "ok", text: `领取表 ${receiptFiles.length} 张` });
-  if (acceptanceFiles.length > 0 && acceptanceFiles.every((r) => r.handler_signed && r.acceptor_signed && r.leader_signed))
-    items.push({ level: "ok", text: `验收单 ${acceptanceFiles.length} 份，签字齐全` });
+  if (acceptanceFiles.length > 0 && acceptanceConfirmed.value)
+    items.push({ level: "ok", text: `验收单 ${acceptanceFiles.length} 份，已确认签字` });
 
   // Step6
   if (nonCardApplicable.value && nonCardFiles.value.length === 0)
@@ -432,7 +425,7 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
 </script>
 
 <template>
-  <div class="p-6">
+  <div class="flex flex-col h-full p-6">
     <div class="flex items-center justify-between mb-4">
       <button @click="router.push('/activities')" class="text-gray-500 hover:text-gray-700">← 返回列表</button>
       <h1 class="text-xl font-bold">{{ activity?.name }}</h1>
@@ -452,8 +445,9 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
       </div>
     </div>
 
-    <div v-if="!activity" class="bg-white p-6 rounded shadow text-gray-400">加载中...</div>
-    <div v-else class="bg-white p-6 rounded shadow">
+    <div class="flex-1 overflow-auto min-h-0">
+      <div v-if="!activity" class="bg-white p-6 rounded shadow text-gray-400">加载中...</div>
+      <div v-else class="bg-white p-6 rounded shadow">
 
       <!-- Step 1 -->
       <div v-if="step === 1">
@@ -572,30 +566,20 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
 
         <!-- 验收单 -->
         <div v-else>
-          <p class="text-sm text-gray-500 mb-3">验收单需电子版(.docx) + 纸质扫描(.jpg)。总价必须 = 数量 × 单价。</p>
-          <button @click="pickAcceptance" class="mb-3 w-full border-2 border-dashed rounded px-3 py-4 text-gray-400 hover:border-blue-400 hover:text-blue-500">
-            + 点击选择验收单文件（可多选）
+          <button @click="pickAcceptance" class="mb-3 w-full border-2 border-dashed rounded px-3 py-6 text-gray-400 hover:border-blue-400 hover:text-blue-500">
+            点击上传 / 拖拽图片到此区域
           </button>
           <div v-if="receipts.filter(r => r.type === 'acceptance').length === 0" class="text-gray-400 text-sm">还没有验收单</div>
-          <div v-else class="space-y-3">
-            <div v-for="r in receipts.filter(r => r.type === 'acceptance')" :key="r.id" class="border rounded p-3">
-              <div class="text-sm mb-2">{{ r.file_path.split(/[\\/]/).pop() }}</div>
-              <div class="grid grid-cols-3 gap-2 mb-2">
-                <label class="text-sm">数量
-                  <input v-model.number="r.quantity" type="number" class="mt-1 block w-full border rounded px-2 py-1" /></label>
-                <label class="text-sm">单价(元)
-                  <input :value="((r.unit_price_cent||0)/100).toFixed(2)" @change="r.unit_price_cent = Math.round(parseFloat(($event.target as HTMLInputElement).value)*100); r.total_price_cent = Math.round((r.quantity||0) * (r.unit_price_cent||0))" type="number" step="0.01" class="mt-1 block w-full border rounded px-2 py-1" /></label>
-                <label class="text-sm">总价(元，自动)
-                  <input :value="((r.total_price_cent||0)/100).toFixed(2)" readonly class="mt-1 block w-full border rounded px-2 py-1 bg-gray-100" /></label>
-              </div>
-              <div class="flex gap-4 text-sm">
-                <label><input type="checkbox" v-model="r.handler_signed" /> 经办人签字</label>
-                <label><input type="checkbox" v-model="r.acceptor_signed" /> 验收人签字</label>
-                <label><input type="checkbox" v-model="r.leader_signed" /> 部门负责人签字</label>
-              </div>
-              <button @click="removeReceipt(r.id)" class="text-red-500 text-sm mt-2">删除</button>
-            </div>
-          </div>
+          <ul v-else class="space-y-1">
+            <li v-for="r in receipts.filter(r => r.type === 'acceptance')" :key="r.id" class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded">
+              <span class="text-sm">✅ {{ acceptanceLabel(r) }}</span>
+              <button @click="removeReceipt(r.id)" class="text-red-500 text-sm">删除</button>
+            </li>
+          </ul>
+          <label class="mt-3 flex items-center gap-2 border rounded p-3 bg-white cursor-pointer">
+            <input type="checkbox" v-model="acceptanceConfirmed" class="w-4 h-4" />
+            <span class="text-sm">我已确认该验收单已完成全部签字（手动打钩）</span>
+          </label>
         </div>
       </div>
 
@@ -749,8 +733,10 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
         </template>
       </div>
     </div>
+    </div>
 
-    <div class="flex justify-between mt-4">
+    <!-- 底部导航：固定在页面底部 -->
+    <div class="shrink-0 flex justify-between items-center mt-4 border-t border-gray-200 pt-4">
       <button @click="prev" :disabled="step <= 1" class="px-4 py-2 border rounded disabled:opacity-30">← 上一步</button>
       <button v-if="step <= 6" @click="saveCurrent" class="px-4 py-2 bg-green-600 text-white rounded">💾 保存本步</button>
       <button @click="next" :disabled="step >= 10" class="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-30">下一步 →</button>
