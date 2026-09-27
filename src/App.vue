@@ -34,6 +34,7 @@ function jump(step?: number) {
             { to: '/tracking', label: '报销跟踪', icon: '🔍' },
             { to: '/templates', label: '模板库', icon: '📁' },
             { to: '/settings', label: '设置', icon: '⚙️' },
+            { to: '/about', label: '关于', icon: 'ℹ️' },
           ]"
           :key="item.to"
           :to="item.to"

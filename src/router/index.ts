@@ -10,6 +10,7 @@ const routes = [
   { path: "/tracking", name: "tracking", component: () => import("../views/Tracking.vue"), meta: { title: "报销跟踪" } },
   { path: "/templates", name: "templates", component: () => import("../views/Templates.vue"), meta: { title: "模板库" } },
   { path: "/settings", name: "settings", component: () => import("../views/Settings.vue"), meta: { title: "设置" } },
+  { path: "/about", name: "about", component: () => import("../views/About.vue"), meta: { title: "关于" } },
 ];
 
 export default createRouter({
