@@ -126,7 +126,7 @@ async function pickReceipt() {
   receipts.value = await db.select("SELECT * FROM receipts WHERE activity_id = ? ORDER BY rowid", [activityId]);
 }
 async function pickAcceptance() {
-  const selected = await openDialog({ multiple: true, filters: [{ name: "验收单", extensions: ["jpg", "jpeg", "docx"] }] });
+  const selected = await openDialog({ multiple: true, filters: [{ name: "验收单", extensions: ["jpg", "jpeg", "docx", "xlsx"] }] });
   if (!selected) return;
   const db = await getDb();
   for (const f of selected as string[]) {
@@ -142,10 +142,12 @@ async function removeReceipt(id: string) {
   await db.execute("DELETE FROM receipts WHERE id = ?", [id]);
   receipts.value = await db.select("SELECT * FROM receipts WHERE activity_id = ? ORDER BY rowid", [activityId]);
 }
-// 验收单显示名：docx → 电子验收单.docx；jpg → 纸质验收单N.jpg
+// 验收单显示名：jpg → 纸质验收单N；docx/xlsx → 电子验收单（统一前缀，扩展名保留区分）
 function acceptanceLabel(r: any) {
-  if (String(r.file_path).toLowerCase().endsWith(".docx")) return "电子验收单.docx";
-  const jpgs = receipts.value.filter((x) => x.type === "acceptance" && !String(x.file_path).toLowerCase().endsWith(".docx"));
+  const p = String(r.file_path).toLowerCase();
+  if (p.endsWith(".docx")) return "电子验收单.docx";
+  if (p.endsWith(".xlsx")) return "电子验收单.xlsx";
+  const jpgs = receipts.value.filter((x) => x.type === "acceptance" && !String(x.file_path).toLowerCase().endsWith(".docx") && !String(x.file_path).toLowerCase().endsWith(".xlsx"));
   return `纸质验收单${jpgs.indexOf(r) + 1}.jpg`;
 }
 
@@ -215,9 +217,12 @@ async function generatePackage() {
   }
   if (acceptanceFiles.length > 0) {
     const aDir = `${topDir}/验收单`;
-    acceptanceFiles.forEach((r, i) => {
-      const ext = r.file_path.split('.').pop();
-      tasks.push([r.file_path, `${aDir}/${ext === 'docx' ? '电子验收单.docx' : `纸质验收单${i+1}.jpg`}`]);
+    let jpgIdx = 0;
+    acceptanceFiles.forEach((r) => {
+      const ext = String(r.file_path).split('.').pop().toLowerCase();
+      if (ext === 'docx') tasks.push([r.file_path, `${aDir}/电子验收单.docx`]);
+      else if (ext === 'xlsx') tasks.push([r.file_path, `${aDir}/电子验收单.xlsx`]);
+      else { jpgIdx += 1; tasks.push([r.file_path, `${aDir}/纸质验收单${jpgIdx}.jpg`]); }
     });
   }
 
