@@ -687,8 +687,6 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
           <div class="text-sm font-semibold mb-2">📋 纸质材料清单：</div>
           <ul class="text-sm space-y-1 list-disc list-inside text-gray-700">
             <li>活动策划书（纸质 2 份，需签字）</li>
-            <li>发票原件（{{ invoices.length }} 张）</li>
-            <li>消费凭证截图（{{ vouchers.length }} 张）</li>
             <li>领取表原件（{{ receipts.filter(r => r.type === 'receipt').length }} 张）</li>
             <li>验收单（{{ receipts.filter(r => r.type === 'acceptance').length }} 份，需三方签字）</li>
             <li v-if="nonCardApplicable">非公务卡审批表（一式两份）</li>

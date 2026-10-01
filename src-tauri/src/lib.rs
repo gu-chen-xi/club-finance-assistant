@@ -1,29 +1,6 @@
 use tauri_plugin_sql::{Migration, MigrationKind};
 use std::fs;
 use std::path::Path;
-use tauri::Manager;
-
-#[tauri::command]
-fn get_template_base(app: tauri::AppHandle) -> Result<String, String> {
-    if cfg!(debug_assertions) {
-        // 开发模式：直接用项目内的模板目录
-        Ok("D:\\project\\社团财务软件项目\\模板\\内置模板\\".to_string())
-    } else {
-        // 打包/免安装模式：依次尝试 资源目录 / exe 所在目录 / 当前目录 下的 模板/内置模板
-        let candidates = [
-            app.path().resource_dir().ok(),
-            app.path().executable_dir().ok(),
-            std::env::current_dir().ok(),
-        ];
-        for base in candidates.iter().flatten() {
-            let p = base.join("模板").join("内置模板");
-            if p.is_dir() {
-                return Ok(p.to_string_lossy().to_string() + "\\");
-            }
-        }
-        Err("找不到内置模板目录（模板/内置模板）".to_string())
-    }
-}
 
 #[tauri::command]
 fn copy_files(files: Vec<(String, String)>) -> Result<(), String> {
@@ -102,8 +79,7 @@ pub fn run() {
             copy_files,
             ensure_dir,
             open_file,
-            delete_files,
-            get_template_base
+            delete_files
         ])
         .setup(|app| {
             let _ = app;

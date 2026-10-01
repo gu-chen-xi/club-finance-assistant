@@ -5,36 +5,6 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { appDataDir, desktopDir } from "@tauri-apps/api/path";
 import { getDb } from "../api/db";
 
-// 内置模板（开发阶段指向项目根目录，打包后改为资源目录）
-const builtinTemplates = [
-  {
-    name: "领取表",
-    desc: "活动物资领取表，纸质交原件",
-    file: "领取表模板.xlsx",
-  },
-  {
-    name: "低值易耗品验收单",
-    desc: "需电子版+纸质版，三方签字",
-    file: '低值易耗品“验收单”模板.docx',
-  },
-  {
-    name: "非公务卡结算特殊情况审批表",
-    desc: "一式两份，不适用公务卡时使用",
-    file: '”非公务卡“结算特殊情况审批表模板.docx',
-  },
-];
-
-// 内置模板目录：运行时解析（开发=D盘项目目录，打包=安装包资源目录）
-async function getBasePath(): Promise<string> {
-  try {
-    const p = await invoke<string>("get_template_base");
-    if (p) return p.replace(/[\\/]+$/, "") + "\\";
-  } catch (e) {
-    console.warn("get_template_base failed:", e);
-  }
-  return "D:\\project\\社团财务软件项目\\模板\\内置模板\\";
-}
-
 // 自定义模板目录：软件数据目录（AppData）下的 custom_templates
 async function getCustomDir(): Promise<string> {
   const dir = (await appDataDir()).replace(/[\\/]+$/, "") + "\\custom_templates\\";
@@ -64,14 +34,6 @@ async function openTemplate(path: string) {
   }
 }
 
-// 内置模板：打开/导出前实时解析模板目录
-async function openBuiltin(file: string) {
-  openTemplate((await getBasePath()) + file);
-}
-async function exportBuiltin(file: string, name: string) {
-  exportToDesktop((await getBasePath()) + file, name);
-}
-
 async function addTemplate() {
   const selected = await openDialog({
     multiple: false,
@@ -80,7 +42,7 @@ async function addTemplate() {
   if (!selected) return;
   const name = prompt("给这个模板起个名字：", (selected as string).split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "自定义模板");
   if (!name) return;
-  // 复制到软件数据目录下的"自定义模板"文件夹（不会改动内置模板）
+  // 复制到软件数据目录下的"自定义模板"文件夹
   const customDir = await getCustomDir();
   const ext = (selected as string).split(".").pop() || "";
   const dst = `${customDir}${name}.${ext}`;
@@ -143,19 +105,6 @@ async function exportToDesktop(filePath: string, name: string) {
       <button @click="addTemplate" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">+ 添加模板</button>
     </div>
     <p class="text-sm text-gray-500 mb-6">点击"打开"用系统默认程序编辑；点击"导出到桌面"复制一份到桌面，方便填写后打印。</p>
-
-    <h2 class="text-base font-semibold mb-3">内置模板</h2>
-    <div class="grid grid-cols-3 gap-4 mb-8">
-      <div v-for="t in builtinTemplates" :key="t.name" class="bg-white p-5 rounded shadow">
-        <div class="text-3xl mb-3">📄</div>
-        <div class="font-semibold">{{ t.name }}</div>
-        <div class="text-xs text-gray-500 mt-1 mb-4">{{ t.desc }}</div>
-        <div class="flex gap-2">
-          <button @click="openBuiltin(t.file)" class="flex-1 px-3 py-2 bg-blue-600 text-white rounded text-sm">打开</button>
-          <button @click="exportBuiltin(t.file, t.name)" class="flex-1 px-3 py-2 border rounded text-sm">导出到桌面</button>
-        </div>
-      </div>
-    </div>
 
     <h2 class="text-base font-semibold mb-3">我的模板</h2>
     <div v-if="customTemplates.length === 0" class="text-gray-400 text-sm mb-4">暂无自定义模板，点右上角"添加模板"添加</div>
