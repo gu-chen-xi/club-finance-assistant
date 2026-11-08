@@ -338,6 +338,18 @@ async function next() {
 }
 async function prev() { await saveStep(); if (step.value > 1) step.value--; }
 
+// 步骤条点击跳转：先保存当前步骤（与上一步/下一步一致）；
+// 从 Step9 向前跳时沿用原守卫：必须先勾选纸质提交
+async function goTo(n: number) {
+  if (!activity.value || n === step.value) return;
+  if (step.value === 9 && !activity.value.paper_submitted && n > step.value) {
+    alert("请先勾选'已交到指定位置'后再进入下一步");
+    return;
+  }
+  await saveStep();
+  step.value = n;
+}
+
 async function pickFile() {
   const selected = await openDialog({ multiple: false, filters: [{ name: "策划书", extensions: ["jpg", "jpeg", "pdf", "doc", "docx"] }] });
   if (selected) {
@@ -443,10 +455,10 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
     <!-- 步骤条 -->
     <div class="flex items-center mb-6 bg-white p-4 rounded shadow">
       <div v-for="(s, i) in STEPS" :key="i" class="flex items-center flex-1 last:flex-none">
-        <div class="flex flex-col items-center">
-          <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
+        <div class="flex flex-col items-center cursor-pointer group" @click="goTo(i + 1)" :title="`跳转到：${s}`">
+          <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white transition group-hover:scale-110"
             :style="{ background: i + 1 < step ? '#10B981' : i + 1 === step ? '#3B82F6' : '#9CA3AF' }">{{ i + 1 }}</div>
-          <div class="text-xs mt-1 whitespace-nowrap">{{ s }}</div>
+          <div class="text-xs mt-1 whitespace-nowrap group-hover:text-blue-600">{{ s }}</div>
         </div>
         <div v-if="i < STEPS.length - 1" class="flex-1 h-0.5 mx-2 -mt-4"
           :style="{ background: i + 1 < step ? '#10B981' : '#E5E7EB' }"></div>
