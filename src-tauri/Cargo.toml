@@ -12,8 +12,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["custom-protocol"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# tauri dev 用 --no-default-features 关掉 custom-protocol 进入 dev 模式（走 vite 开发服务器）；
+# 打包（tauri build / 普通 cargo build）走默认 features，启用 custom-protocol 加载内置 dist
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -8,6 +8,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // 开发期禁用一切 HTTP 缓存（解决 WebView2 缓存旧前端资源导致界面不更新的问题）
+    headers: {
+      "Cache-Control": "no-store",
+    },
     watch: {
       // Tauri 自己管理 src-tauri 下的文件
       ignored: ["**/src-tauri/**"],
