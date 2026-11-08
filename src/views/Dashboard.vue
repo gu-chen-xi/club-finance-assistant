@@ -1,31 +1,23 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
-import { getDb } from "../api/db";
-import { getSettings } from "../api/settings";
+import { balanceStore, balance, loadBalanceData } from "../api/balance";
 
 const router = useRouter();
-const settings = ref<any>(null);
-const activities = ref<any[]>([]);
 
 onMounted(load);
 
 async function load() {
-  const db = await getDb();
-  settings.value = await getSettings();
-  activities.value = await db.select("SELECT * FROM activities ORDER BY created_at DESC");
-  // 真实余额为 0 → 清零烟花（首次进入）
-  if (balance.value === 0) launchFireworks();
+  await loadBalanceData();
+  // 真实花到 0（存在已归档活动）→ 清零烟花；新装软件余额本来就是 0，不放
+  if (balance.value === 0 && hasArchived.value) launchFireworks();
 }
 
-// 当前余额 = 初始余额 - 已归档活动实际支出
-const balance = computed(() => {
-  const initial = settings.value?.initialBalance || 0;
-  const spent = activities.value
-    .filter((a) => a.archived)
-    .reduce((s, a) => s + (a.actual_cost || 0), 0);
-  return (initial - spent) / 100;
-});
+// 是否存在已归档活动（区分"新装软件余额为0"和"真的花到0"）
+const hasArchived = computed(() => balanceStore.activities.some((a) => a.archived));
+
+// 活动列表来自共享余额数据源（与侧边栏余额同源）
+const activities = computed(() => balanceStore.activities);
 
 // 本月支出（已归档）
 const monthSpent = computed(() => {
@@ -141,9 +133,9 @@ function closeFireworks() {
   cancelAnimationFrame(fireRaf);
 }
 
-// 余额变成 0 时触发烟花（运行中归零；避免初始未加载状态误判）
+// 余额变成 0 时触发烟花（运行中归零；避免初始未加载状态/新装软件误判）
 watch(balance, (v) => {
-  if (v === 0 && !showFireworks.value) launchFireworks();
+  if (v === 0 && !showFireworks.value && hasArchived.value) launchFireworks();
 });
 onBeforeUnmount(() => cancelAnimationFrame(fireRaf));
 </script>

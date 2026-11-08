@@ -63,6 +63,12 @@ export async function createActivity(name: string, date: string): Promise<Activi
 
 export async function deleteActivity(id: string): Promise<void> {
   const db = await getDb();
+  // 先清关联表，避免留下孤儿数据（与总账页删除逻辑保持一致）
+  await db.execute("DELETE FROM purchase_items WHERE activity_id = ?", [id]);
+  await db.execute("DELETE FROM invoices WHERE activity_id = ?", [id]);
+  await db.execute("DELETE FROM vouchers WHERE activity_id = ?", [id]);
+  await db.execute("DELETE FROM receipts WHERE activity_id = ?", [id]);
+  await db.execute("DELETE FROM non_card WHERE activity_id = ?", [id]);
   await db.execute("DELETE FROM activities WHERE id = ?", [id]);
 }
 

@@ -68,7 +68,8 @@ async function deleteActivity(a: any) {
           <td class="border p-2 text-sm">{{ a.date }}</td>
           <td class="border p-2">{{ a.name }}</td>
           <td class="border p-2 text-right text-sm">-¥{{ ((a.actual_cost || 0) / 100).toFixed(2) }}</td>
-          <td class="border p-2 text-right text-sm">¥{{ (((settings?.initialBalance || 0) / 100) - activities.slice(0, activities.indexOf(a) + 1).reduce((s, x) => s + (x.actual_cost || 0), 0) / 100).toFixed(2) }}</td>
+          <!-- 列表按日期倒序，该行余额 = 初始余额 - (该行及比它早的活动)的支出合计 -->
+          <td class="border p-2 text-right text-sm">¥{{ (((settings?.initialBalance || 0) / 100) - activities.slice(activities.indexOf(a)).reduce((s, x) => s + (x.actual_cost || 0), 0) / 100).toFixed(2) }}</td>
           <td class="border p-2 text-center">
             <button @click.stop="deleteActivity(a)" class="text-red-500 hover:text-red-700 text-sm">删除</button>
           </td>

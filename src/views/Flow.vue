@@ -172,13 +172,16 @@ async function generatePackage() {
   if (!outputDir.value) { alert("请先选择输出目录"); return; }
   const redCount = healthErrors.value.length;
   if (redCount > 0) {
-    if (!confirm(`还有 ${redCount} 个红项未解决，确定要生成吗？`)) return;
+    alert(`还有 ${redCount} 个红项未解决，请先全部解决后再生成电子包。`);
+    return;
   }
   generating.value = true;
   genLog.value = "开始生成...";
 
-  const club = settings.value?.clubName || "社团";
-  const teacher = settings.value?.teacherName || "老师";
+  // Windows 文件名非法字符清洗，避免生成目录/复制文件失败
+  const sanitize = (s: string) => s.replace(/[\\/:*?"<>|]/g, "_").trim();
+  const club = sanitize(settings.value?.clubName || "社团");
+  const teacher = sanitize(settings.value?.teacherName || "老师");
   const totalYuan = (invoiceTotal.value / 100).toFixed(2);
   genLog.value = `社团=${club} 老师=${teacher} totalYuan=${totalYuan} invoiceTotal分=${invoiceTotal.value}`;
   const topName = `${club}打给${teacher}${totalYuan}元`;
@@ -190,7 +193,7 @@ async function generatePackage() {
   const invDir = `${topDir}/${invoices.value.length}张发票${totalYuan}元`;
   invoices.value.forEach((inv, i) => {
     const ext = inv.fileExt || "jpg";
-    const name = `${inv.itemName || "物品"}+${(inv.amountCent/100).toFixed(2)}.${ext}`;
+    const name = `${sanitize(inv.itemName || "物品")}+${(inv.amountCent/100).toFixed(2)}.${ext}`;
     tasks.push([inv.filePath, `${invDir}/${name}`]);
   });
 
@@ -228,7 +231,7 @@ async function generatePackage() {
 
   // 活动策划目录
   if (activity.value.plan_file_path) {
-    const pDir = `${topDir}/${activity.value.name}`;
+    const pDir = `${topDir}/${sanitize(activity.value.name)}`;
     const ext = activity.value.plan_file_path.split('.').pop();
     tasks.push([activity.value.plan_file_path, `${pDir}/活动策划.${ext}`]);
   }

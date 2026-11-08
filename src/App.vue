@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from "vue-router";
-import { computed } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { healthStore, healthErrors, healthWarnings, healthOks, healthOkNotes } from "./api/health";
+import { balance, balanceLoaded, loadBalanceData } from "./api/balance";
 
 const route = useRoute();
 const router = useRouter();
 const showHealthPanel = computed(() => route.path.startsWith("/activities"));
+
+// 侧边栏余额与工作台共用同一数据源；每次切换页面刷新，保证设置/归档改动后同步
+onMounted(loadBalanceData);
+watch(() => route.path, loadBalanceData);
 
 function jump(step?: number) {
   if (!step) return;
@@ -45,7 +50,7 @@ function jump(step?: number) {
           <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
-      <div class="p-3 text-xs text-slate-400 border-t border-slate-700">余额：¥ --</div>
+      <div class="p-3 text-xs text-slate-400 border-t border-slate-700">余额：¥ {{ balanceLoaded ? balance.toFixed(2) : "--" }}</div>
     </aside>
 
     <main class="flex-1 overflow-auto bg-gray-50">
