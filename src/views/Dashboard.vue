@@ -19,6 +19,9 @@ const hasArchived = computed(() => balanceStore.activities.some((a) => a.archive
 // 活动列表来自共享余额数据源（与侧边栏余额同源）
 const activities = computed(() => balanceStore.activities);
 
+// 当前月份（取电脑系统时间，用于"本月支出"标签展示）
+const currentMonth = new Date().getMonth() + 1;
+
 // 本月支出（已归档）
 const monthSpent = computed(() => {
   const now = new Date();
@@ -158,7 +161,7 @@ onBeforeUnmount(() => cancelAnimationFrame(fireRaf));
         <div v-if="balanceState === 'zero'" class="text-xs text-emerald-600 mt-1 font-medium">🎉 已清零，无债一身轻！</div>
       </div>
       <div class="bg-white p-5 rounded shadow">
-        <div class="text-sm text-gray-500">本月支出</div>
+        <div class="text-sm text-gray-500">本月支出（{{ currentMonth }}月）</div>
         <div class="text-3xl font-bold mt-2 text-gray-800">¥{{ monthSpent.toFixed(2) }}</div>
       </div>
       <div class="bg-white p-5 rounded shadow">
