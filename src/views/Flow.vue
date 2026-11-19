@@ -10,6 +10,7 @@ import {
   listInvoices, addInvoice, deleteInvoice, updateInvoice, type Invoice,
   listVouchers, addVoucher, deleteVoucher, type Voucher,
 } from "../api/invoices";
+import { listPlanFiles, addPlanFile, deletePlanFile, type PlanFile } from "../api/activities";
 
 const route = useRoute();
 const router = useRouter();
@@ -23,6 +24,7 @@ const STEPS = [
 const step = ref(1);
 const activity = ref<any>(null);
 const purchaseItems = ref<any[]>([]);
+const planFiles = ref<PlanFile[]>([]);
 const invoices = ref<Invoice[]>([]);
 const vouchers = ref<Voucher[]>([]);
 const settings = ref<any>(null);
@@ -37,6 +39,7 @@ const nonCardFiles = ref<string[]>([]);
 // Step7: 生成电子包
 const outputDir = ref("");
 const generating = ref(false);
+const archiving = ref(false);
 const genLog = ref("");
 
 onMounted(load);
@@ -55,6 +58,7 @@ async function load() {
   }));
   invoices.value = await listInvoices(activityId);
   vouchers.value = await listVouchers(activityId);
+  planFiles.value = await listPlanFiles(activityId);
   receipts.value = await db.select("SELECT * FROM receipts WHERE activity_id = ? ORDER BY rowid", [activityId]);
   acceptanceConfirmed.value = !!(receipts.value.find((r: any) => r.type === "acceptance")?.confirmed);
   const nc = await db.select("SELECT * FROM non_card WHERE activity_id = ?", [activityId]);
@@ -230,10 +234,12 @@ async function generatePackage() {
   }
 
   // 活动策划目录
-  if (activity.value.plan_file_path) {
+  if (planFiles.value.length > 0) {
     const pDir = `${topDir}/${sanitize(activity.value.name)}`;
-    const ext = activity.value.plan_file_path.split('.').pop();
-    tasks.push([activity.value.plan_file_path, `${pDir}/活动策划.${ext}`]);
+    planFiles.value.forEach((pf, i) => {
+      const ext = pf.filePath.split('.').pop();
+      tasks.push([pf.filePath, `${pDir}/活动策划${i + 1}.${ext}`]);
+    });
   }
 
   // 非公务卡
@@ -273,24 +279,106 @@ async function changeReviewStatus(newStatus: string) {
   activity.value.review_reject_reason = reason;
 }
 
+// Step10: 打开归档目录
+async function openArchiveFolder() {
+  if (!activity.value?.archive_path) return;
+  try {
+    await invoke("open_file", { path: activity.value.archive_path });
+  } catch (e: any) {
+    alert(`打开失败：${e?.message || e}`);
+  }
+}
+
 // Step10: 归档
 async function archiveActivity() {
-  const actualCost = invoiceTotal.value - refundTotal.value;
-  const db = await getDb();
-  await db.execute(
-    "UPDATE activities SET archived = 1, actual_cost = ? WHERE id = ?",
-    [actualCost, activityId]
-  );
-  activity.value.archived = 1;
-  activity.value.actual_cost = actualCost;
+  if (archiving.value) return;
+  // 实际支出按净支付口径：支出凭证合计 − 退款凭证合计
+  const actualCost = voucherTotal.value - refundTotal.value;
+  const sanitize = (s: string) => String(s || "").replace(/[\\/:*?"<>|]/g, "_").trim();
+  const extOf = (p: string) => (String(p).split(".").pop() || "jpg").toLowerCase();
+
+  archiving.value = true;
+  try {
+    const root = await invoke<string>("archive_root");
+    const amountYuan = (actualCost / 100).toFixed(2);
+    const folderName =
+      sanitize(`${activity.value.date}_${activity.value.name}_${amountYuan}元`) || `归档-${Date.now()}`;
+    const dir = await invoke<string>("create_unique_dir", { parent: root, name: folderName });
+
+    const tasks: [string, string][] = [];
+
+    // Step1 活动策划书
+    planFiles.value.forEach((pf, i) => {
+      tasks.push([pf.filePath, `${dir}/活动策划/活动策划书${i + 1}.${extOf(pf.filePath)}`]);
+    });
+
+    // Step3 发票
+    invoices.value.forEach((inv, i) => {
+      const ext = inv.fileExt || extOf(inv.filePath);
+      tasks.push([
+        inv.filePath,
+        `${dir}/发票/发票${i + 1}_${sanitize(inv.itemName || "物品")}_${(inv.amountCent / 100).toFixed(2)}元.${ext}`,
+      ]);
+    });
+
+    // Step4 凭证（消费 + 退款）
+    const expenseV = vouchers.value.filter((v) => !v.isRefund);
+    const refundV = vouchers.value.filter((v) => v.isRefund);
+    expenseV.forEach((v, i) => {
+      tasks.push([v.filePath, `${dir}/凭证/消费凭证${i + 1}_${(v.amountCent / 100).toFixed(2)}元.${extOf(v.filePath)}`]);
+    });
+    refundV.forEach((v, i) => {
+      tasks.push([v.filePath, `${dir}/凭证/退款${i + 1}_${(v.amountCent / 100).toFixed(2)}元.${extOf(v.filePath)}`]);
+    });
+
+    // Step5 领取表 / 验收单
+    receipts.value.filter((r) => r.type === "receipt").forEach((r, i) => {
+      tasks.push([r.file_path, `${dir}/领取表/领取表${i + 1}.${extOf(r.file_path)}`]);
+    });
+    let paperAcceptance = 0;
+    receipts.value.filter((r) => r.type === "acceptance").forEach((r) => {
+      const ext = extOf(r.file_path);
+      const name =
+        ext === "docx" || ext === "xlsx"
+          ? `电子验收单.${ext}`
+          : `纸质验收单${++paperAcceptance}.${ext}`;
+      tasks.push([r.file_path, `${dir}/验收单/${name}`]);
+    });
+
+    // Step6 非公务卡（不适用或无文件则跳过）
+    if (nonCardApplicable.value && nonCardFiles.value.length > 0) {
+      nonCardFiles.value.forEach((f, i) => {
+        tasks.push([f, `${dir}/非公务卡结算审批表/非公务卡结算特殊情况审批表${i + 1}.${extOf(f)}`]);
+      });
+    }
+
+    if (tasks.length > 0) {
+      await invoke("copy_files", { files: tasks });
+    }
+
+    // 文件复制成功后再落库，避免「已归档但文件夹不存在」
+    const db = await getDb();
+    await db.execute(
+      "UPDATE activities SET archived = 1, actual_cost = ?, archive_path = ?, current_step = 10 WHERE id = ?",
+      [actualCost, dir, activityId]
+    );
+    activity.value.archived = 1;
+    activity.value.actual_cost = actualCost;
+    activity.value.archive_path = dir;
+    activity.value.current_step = 10;
+  } catch (e: any) {
+    alert(`归档失败：${e?.message || e}`);
+  } finally {
+    archiving.value = false;
+  }
 }
 
 async function saveStep() {
   const db = await getDb();
   if (step.value === 1) {
     await db.execute(
-      "UPDATE activities SET name = ?, date = ?, plan_file_path = ? WHERE id = ?",
-      [activity.value.name, activity.value.date, activity.value.plan_file_path || "", activityId]
+      "UPDATE activities SET name = ?, date = ? WHERE id = ?",
+      [activity.value.name, activity.value.date, activityId]
     );
   }
   if (step.value === 2) {
@@ -350,10 +438,28 @@ async function goTo(n: number) {
   step.value = n;
 }
 
-async function pickFile() {
-  const selected = await openDialog({ multiple: false, filters: [{ name: "策划书", extensions: ["jpg", "jpeg", "pdf", "doc", "docx"] }] });
-  if (selected) {
-    activity.value.plan_file_path = selected as string;
+async function pickPlanFiles() {
+  const selected = await openDialog({
+    multiple: true,
+    filters: [{ name: "策划书", extensions: ["jpg", "jpeg", "pdf", "doc", "docx"] }],
+  });
+  if (!selected) return;
+  try {
+    for (const f of selected as string[]) {
+      await addPlanFile(activityId, f);
+    }
+    planFiles.value = await listPlanFiles(activityId);
+  } catch (e: any) {
+    alert(`添加策划书失败：${e?.message || e}`);
+  }
+}
+
+async function removePlanFile(id: string) {
+  try {
+    await deletePlanFile(id);
+    planFiles.value = await listPlanFiles(activityId);
+  } catch (e: any) {
+    alert(`删除失败：${e?.message || e}`);
   }
 }
 
@@ -370,9 +476,9 @@ const healthItems = computed<HealthItem[]>(() => {
   // Step1
   if (!activity.value.name) items.push({ level: "error", text: "活动名为空", step: 1 });
   if (!activity.value.date) items.push({ level: "error", text: "活动日期未选", step: 1 });
-  if (!activity.value.plan_file_path) items.push({ level: "warning", text: "未上传活动策划书", step: 1 });
-  if (activity.value.name && activity.value.date && activity.value.plan_file_path)
-    items.push({ level: "ok", text: "活动策划齐全" });
+  if (planFiles.value.length === 0) items.push({ level: "warning", text: "未上传活动策划书", step: 1 });
+  if (activity.value.name && activity.value.date && planFiles.value.length > 0)
+    items.push({ level: "ok", text: `活动策划齐全（${planFiles.value.length} 份）` });
 
   // Step2
   if (purchaseItems.value.length === 0) items.push({ level: "error", text: "采购清单为空", step: 2 });
@@ -394,13 +500,16 @@ const healthItems = computed<HealthItem[]>(() => {
   const expenseVouchers = vouchers.value.filter((v) => !v.isRefund);
   if (expenseVouchers.length === 0) items.push({ level: "error", text: "未上传消费凭证", step: 4 });
   else {
-    const invTotal = invoiceTotal.value;      // 发票合计（分）
-    const vchTotal = voucherTotal.value;      // 凭证支出合计（分）
-    const diff = invTotal - vchTotal;         // >0: 凭证不足；<0: 凭证超出
+    const invTotal = invoiceTotal.value;                    // 发票合计（分）
+    const netPaid = voucherTotal.value - refundTotal.value; // 净支付 = 支出凭证 − 退款凭证
+    const diff = invTotal - netPaid;                        // >0: 净支付不足；<0: 净支付超出
     const diffAbs = Math.abs(diff);
 
     // 独立数量统计，用于报账包文件夹名
-    items.push({ level: "ok", text: `🧾 ${expenseVouchers.length} 张凭证，共 ¥${(vchTotal/100).toFixed(2)}` });
+    items.push({
+      level: "ok",
+      text: `🧾 ${expenseVouchers.length} 张凭证，支出 ¥${(voucherTotal.value/100).toFixed(2)}，退款 ¥${(refundTotal.value/100).toFixed(2)}，净支付 ¥${(netPaid/100).toFixed(2)}`,
+    });
 
     if (invTotal <= 0) {
       // 发票金额还没填全，先不做金额比对
@@ -411,11 +520,11 @@ const healthItems = computed<HealthItem[]>(() => {
         items.push({ level: "ok-note", text: `✅ 金额校验通过（存在 ${diffAbs} 分微小差额，请注意核验支付平台满减或抹零）` });
       }
     } else if (diff > 10) {
-      // 凭证支出 < 发票，差 > 0.1 元 → 红项阻断
-      items.push({ level: "error", text: `凭证总金额（¥${(vchTotal/100).toFixed(2)}）与发票总金额（¥${(invTotal/100).toFixed(2)}）不符，差额超出0.1元容差范围`, step: 4 });
+      // 净支付 < 发票，差 > 0.1 元 → 红项阻断
+      items.push({ level: "error", text: `净支付（¥${(netPaid/100).toFixed(2)}）低于发票总金额（¥${(invTotal/100).toFixed(2)}），差额超出0.1元容差范围`, step: 4 });
     } else {
-      // 凭证支出 > 发票，差 > 0.1 元 → 黄项警告
-      items.push({ level: "warning", text: `凭证总金额（¥${(vchTotal/100).toFixed(2)}）与发票总金额（¥${(invTotal/100).toFixed(2)}）不符，差额超出0.1元容差范围`, step: 4 });
+      // 净支付 > 发票，差 > 0.1 元 → 黄项警告
+      items.push({ level: "warning", text: `净支付（¥${(netPaid/100).toFixed(2)}）高于发票总金额（¥${(invTotal/100).toFixed(2)}），差额超出0.1元容差范围，请核对是否有发票未录入`, step: 4 });
     }
   }
 
@@ -478,10 +587,18 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
             <input v-model="activity.name" class="mt-1 block w-full border rounded px-3 py-2" /></label>
           <label class="block"><span class="text-sm text-gray-600">活动日期</span>
             <input v-model="activity.date" type="date" class="mt-1 block w-full border rounded px-3 py-2" /></label>
-          <div><span class="text-sm text-gray-600">活动策划书（jpg/pdf/doc/docx）</span>
-            <button @click="pickFile" class="mt-1 block w-full border-2 border-dashed rounded px-3 py-4 text-gray-400 hover:border-blue-400 hover:text-blue-500">
-              {{ activity.plan_file_path ? activity.plan_file_path.split(/[\\/]/).pop() : "点击选择策划书文件" }}
-            </button></div>
+          <div>
+            <span class="text-sm text-gray-600">活动策划书（jpg/pdf/doc/docx，可多选）</span>
+            <button @click="pickPlanFiles" class="mt-1 block w-full border-2 border-dashed rounded px-3 py-4 text-gray-400 hover:border-blue-400 hover:text-blue-500">
+              + 点击添加策划书文件（可多选）
+            </button>
+            <ul v-if="planFiles.length > 0" class="mt-2 space-y-1">
+              <li v-for="f in planFiles" :key="f.id" class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded">
+                <span class="text-sm truncate">{{ f.filePath.split(/[\\/]/).pop() }}</span>
+                <button @click="removePlanFile(f.id)" class="text-red-500 text-sm">删除</button>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -557,7 +674,7 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
           </tbody>
         </table>
         <div class="mt-3 text-right text-sm">
-          支出 ¥{{ (voucherTotal / 100).toFixed(2) }}　退款 ¥{{ (refundTotal / 100).toFixed(2) }}
+          支出 ¥{{ (voucherTotal / 100).toFixed(2) }}　退款 ¥{{ (refundTotal / 100).toFixed(2) }}　净支付 ¥{{ ((voucherTotal - refundTotal) / 100).toFixed(2) }}
         </div>
       </div>
 
@@ -726,6 +843,8 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
           <div class="text-4xl mb-2">📦</div>
           <div class="text-lg font-bold text-green-700">已归档</div>
           <div class="text-sm text-gray-500 mt-2">本活动已归档到历史，总账已更新</div>
+          <div v-if="activity.archive_path" class="text-xs text-gray-500 mt-2 break-all">归档目录：{{ activity.archive_path }}</div>
+          <button v-if="activity.archive_path" @click="openArchiveFolder" class="mt-3 px-4 py-2 border rounded text-sm">📂 打开归档文件夹</button>
         </div>
 
         <template v-else>
@@ -733,8 +852,9 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
             <div class="text-sm font-semibold mb-2">📊 本次报账汇总：</div>
             <div class="text-sm space-y-1">
               <div>发票总额：¥{{ (invoiceTotal/100).toFixed(2) }}</div>
+              <div>支出总额：¥{{ (voucherTotal/100).toFixed(2) }}</div>
               <div>退款总额：¥{{ (refundTotal/100).toFixed(2) }}</div>
-              <div class="font-bold border-t pt-1">实际支出：¥{{ ((invoiceTotal - refundTotal)/100).toFixed(2) }}</div>
+              <div class="font-bold border-t pt-1">实际支出（支出 − 退款）：¥{{ ((voucherTotal - refundTotal)/100).toFixed(2) }}</div>
             </div>
           </div>
 
@@ -745,8 +865,8 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
             ⚠️ 纸质材料尚未提交，请先在 Step 9 勾选确认。
           </div>
 
-          <button @click="archiveActivity" :disabled="activity.review_status !== 'approved' || !activity.paper_submitted" class="w-full px-4 py-3 bg-gray-800 text-white rounded font-bold disabled:opacity-40">
-            📦 归档此活动
+          <button @click="archiveActivity" :disabled="archiving || activity.review_status !== 'approved' || !activity.paper_submitted" class="w-full px-4 py-3 bg-gray-800 text-white rounded font-bold disabled:opacity-40">
+            {{ archiving ? "⏳ 正在归档..." : "📦 归档此活动" }}
           </button>
         </template>
       </div>

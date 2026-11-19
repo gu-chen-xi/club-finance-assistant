@@ -12,6 +12,7 @@ export interface Activity {
   reviewRejectReason: string;
   paperSubmitted: boolean;
   archived: boolean;
+  archivePath: string;
   createdAt: string;
 }
 
@@ -47,6 +48,7 @@ export async function createActivity(name: string, date: string): Promise<Activi
     reviewRejectReason: "",
     paperSubmitted: false,
     archived: false,
+    archivePath: "",
     createdAt: new Date().toISOString(),
   };
   await db.execute(
@@ -61,9 +63,47 @@ export async function createActivity(name: string, date: string): Promise<Activi
   return a;
 }
 
+export interface PlanFile {
+  id: string;
+  activityId: string;
+  filePath: string;
+}
+
+export async function listPlanFiles(activityId: string): Promise<PlanFile[]> {
+  const db = await getDb();
+  const rows = await db.select(
+    "SELECT * FROM plan_files WHERE activity_id = ? ORDER BY sort, rowid",
+    [activityId]
+  );
+  return (rows as any[]).map((r) => ({
+    id: r.id,
+    activityId: r.activity_id,
+    filePath: r.file_path,
+  }));
+}
+
+export async function addPlanFile(activityId: string, filePath: string): Promise<void> {
+  const db = await getDb();
+  const rows = await db.select(
+    "SELECT COUNT(*) AS n FROM plan_files WHERE activity_id = ?",
+    [activityId]
+  );
+  const sort = (rows as any[])[0]?.n || 0;
+  await db.execute(
+    "INSERT INTO plan_files (id, activity_id, file_path, sort) VALUES (?, ?, ?, ?)",
+    [`pf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, activityId, filePath, sort]
+  );
+}
+
+export async function deletePlanFile(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM plan_files WHERE id = ?", [id]);
+}
+
 export async function deleteActivity(id: string): Promise<void> {
   const db = await getDb();
   // 先清关联表，避免留下孤儿数据（与总账页删除逻辑保持一致）
+  await db.execute("DELETE FROM plan_files WHERE activity_id = ?", [id]);
   await db.execute("DELETE FROM purchase_items WHERE activity_id = ?", [id]);
   await db.execute("DELETE FROM invoices WHERE activity_id = ?", [id]);
   await db.execute("DELETE FROM vouchers WHERE activity_id = ?", [id]);
@@ -85,6 +125,7 @@ function rowToActivity(r: any): Activity {
     reviewRejectReason: r.review_reject_reason ?? "",
     paperSubmitted: !!r.paper_submitted,
     archived: !!r.archived,
+    archivePath: r.archive_path ?? "",
     createdAt: r.created_at,
   };
 }
