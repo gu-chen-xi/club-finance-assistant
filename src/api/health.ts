@@ -8,9 +8,12 @@ export interface HealthItem {
 
 export const healthStore = reactive({
   items: [] as HealthItem[],
+  // 当前打开活动的名称，侧栏体检面板顶部展示
+  activityName: "",
   // 供 Flow.vue 更新
-  set(items: HealthItem[]) {
+  set(items: HealthItem[], activityName = "") {
     this.items = items;
+    this.activityName = activityName;
   },
 });
 

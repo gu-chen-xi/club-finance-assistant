@@ -58,7 +58,13 @@ function jump(step?: number) {
     </main>
 
     <aside v-if="showHealthPanel" class="w-[320px] shrink-0 bg-white border-l border-gray-200 p-4 overflow-auto">
-      <h2 class="text-base font-semibold mb-3">报账体检</h2>
+      <h2 class="text-base font-semibold mb-1">报账体检</h2>
+      <div
+        v-if="healthStore.activityName"
+        class="text-xs text-gray-500 mb-3 truncate"
+        :title="healthStore.activityName"
+      >活动名：{{ healthStore.activityName }}</div>
+      <div v-else class="mb-3"></div>
 
       <div v-if="healthStore.items.length === 0" class="text-sm text-gray-400">
         进入活动后自动体检

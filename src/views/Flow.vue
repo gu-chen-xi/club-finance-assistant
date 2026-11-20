@@ -607,7 +607,7 @@ const healthItems = computed<HealthItem[]>(() => {
   return items;
 });
 
-watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: true });
+watch(healthItems, (items) => healthStore.set(items, activity.value?.name || ""), { immediate: true, deep: true });
 </script>
 
 <template>
