@@ -10,9 +10,11 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  confirm: [amountYuan: number];
+  confirm: [amountYuan: number, itemName: string];
   cancel: [];
 }>();
+
+const nameInput = ref(props.itemName || "");
 
 const fileName = computed(() => props.filePath.split(/[\\/]/).pop() || props.filePath);
 const imgUrl = ref("");
@@ -99,6 +101,11 @@ async function run() {
             </div>
 
             <label class="block">
+              <span class="text-xs text-gray-500">物品名（不识别，照原图手动填写）</span>
+              <input v-model="nameInput" class="mt-1 block w-full border rounded px-3 py-2" placeholder="如：蜡烛 / 鼠标垫" />
+            </label>
+
+            <label class="block">
               <span class="text-xs text-gray-500">识别金额（元，可手动修正）</span>
               <input v-model="amountInput" type="number" step="0.01" class="mt-1 block w-full border rounded px-3 py-2 text-lg font-mono" />
             </label>
@@ -117,10 +124,10 @@ async function run() {
         <button @click="emit('cancel')" class="px-4 py-2 border rounded">取消</button>
         <button @click="run" :disabled="status === 'running'" class="px-4 py-2 border rounded disabled:opacity-40">重新识别</button>
         <button
-          @click="amountValue !== null && emit('confirm', amountValue)"
+          @click="amountValue !== null && emit('confirm', amountValue, nameInput.trim())"
           :disabled="amountValue === null"
           class="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-40"
-        >填入金额</button>
+        >确认填入</button>
       </div>
     </div>
   </div>

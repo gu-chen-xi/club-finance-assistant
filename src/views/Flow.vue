@@ -136,11 +136,11 @@ function openOcr(inv: Invoice) {
   }
   ocrTarget.value = inv;
 }
-async function applyOcrAmount(amountYuan: number) {
+async function applyOcrAmount(amountYuan: number, itemName: string) {
   const inv = ocrTarget.value;
   if (!inv) return;
   inv.amountCent = Math.round(amountYuan * 100);
-  if (!inv.itemName) inv.itemName = nameFromFile(inv.filePath);
+  inv.itemName = itemName || inv.itemName || nameFromFile(inv.filePath);
   await saveInvoice(inv);
   ocrTarget.value = null;
 }
