@@ -11,6 +11,9 @@ import {
   listVouchers, addVoucher, deleteVoucher, type Voucher,
 } from "../api/invoices";
 import { listPlanFiles, addPlanFile, deletePlanFile, type PlanFile } from "../api/activities";
+import { parseBudgetFromDocx, type BudgetRow } from "../api/docxBudget";
+import BudgetExtractDialog from "../components/BudgetExtractDialog.vue";
+import InvoiceOcrDialog from "../components/InvoiceOcrDialog.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -41,6 +44,9 @@ const outputDir = ref("");
 const generating = ref(false);
 const archiving = ref(false);
 const genLog = ref("");
+// Step2 预算识别弹窗 / Step3 发票金额识别弹窗
+const budgetDialog = ref<{ rows: BudgetRow[]; fileName: string; warnings: string[]; existingCount: number } | null>(null);
+const ocrTarget = ref<Invoice | null>(null);
 
 onMounted(load);
 
@@ -75,7 +81,42 @@ function removeRow(idx: number) { purchaseItems.value.splice(idx, 1); }
 const subtotal = (row: any) => (row.quantity || 0) * (row.unit_price || 0);
 const totalAmount = computed(() => purchaseItems.value.reduce((s, r) => s + subtotal(r), 0));
 
+// 从策划书 docx 的「经费预算」表格识别预算行（结果仅进弹窗，确认后才改动清单）
+async function extractBudget() {
+  let path = planFiles.value.find((f) => /\.docx$/i.test(f.filePath))?.filePath;
+  if (!path) {
+    const selected = await openDialog({
+      multiple: false,
+      filters: [{ name: "策划书 docx", extensions: ["docx"] }],
+    });
+    if (!selected) return;
+    path = selected as string;
+  }
+  try {
+    const result = await parseBudgetFromDocx(path);
+    budgetDialog.value = {
+      rows: result.rows,
+      fileName: path.split(/[\\/]/).pop() || path,
+      warnings: result.warnings,
+      existingCount: purchaseItems.value.filter((r) => r.name).length,
+    };
+  } catch (e: any) {
+    alert(`预算识别失败：${e?.message || e}\n可手动填写采购清单。`);
+  }
+}
+function applyBudget(mode: "replace" | "append", rows: BudgetRow[]) {
+  const mapped = rows.map((r) => ({ name: r.name, quantity: r.quantity, unit_price: r.unitPrice }));
+  if (mode === "replace") purchaseItems.value = mapped;
+  else purchaseItems.value = purchaseItems.value.filter((r) => r.name).concat(mapped);
+  budgetDialog.value = null;
+}
+
 // 发票
+// 物品名不识别，用文件名兜底（去掉末尾的金额数字）
+function nameFromFile(path: string): string {
+  const base = (path.split(/[\\/]/).pop() || "").replace(/\.[^.]+$/, "");
+  return base.replace(/[\s_-]*\d+(\.\d+)?$/, "").trim() || base;
+}
 async function pickInvoices() {
   const selected = await openDialog({
     multiple: true,
@@ -83,9 +124,25 @@ async function pickInvoices() {
   });
   if (!selected) return;
   for (const f of selected as string[]) {
-    await addInvoice(activityId, f, "", 0);
+    await addInvoice(activityId, f, nameFromFile(f), 0);
   }
   invoices.value = await listInvoices(activityId);
+}
+// 发票金额识别：只处理图片，成功与否都需人工确认后才填回
+function openOcr(inv: Invoice) {
+  if (!/\.(jpe?g|png)$/i.test(inv.filePath)) {
+    alert("PDF 发票暂不支持自动识别，请手动填写金额。");
+    return;
+  }
+  ocrTarget.value = inv;
+}
+async function applyOcrAmount(amountYuan: number) {
+  const inv = ocrTarget.value;
+  if (!inv) return;
+  inv.amountCent = Math.round(amountYuan * 100);
+  if (!inv.itemName) inv.itemName = nameFromFile(inv.filePath);
+  await saveInvoice(inv);
+  ocrTarget.value = null;
 }
 async function saveInvoice(inv: Invoice) {
   await updateInvoice(inv.id, inv.itemName, inv.amountCent / 100, inv.headChecked);
@@ -620,14 +677,20 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
             </tr>
           </tbody>
         </table>
-        <button @click="addRow" class="mt-2 px-3 py-1 border rounded text-sm">+ 添加一行</button>
+        <div class="flex items-center gap-3">
+          <button @click="addRow" class="px-3 py-1 border rounded text-sm">+ 添加一行</button>
+          <button @click="extractBudget" class="px-3 py-1 border rounded text-sm text-blue-600 border-blue-300 hover:bg-blue-50">
+            📄 从策划书识别预算（docx）
+          </button>
+          <span class="text-xs text-gray-400">优先读取 Step 1 已上传的 docx；识别结果需人工核对</span>
+        </div>
         <div class="mt-4 text-right font-bold">合计：¥{{ totalAmount.toFixed(2) }}</div>
       </div>
 
       <!-- Step 3: 发票 -->
       <div v-else-if="step === 3">
         <h2 class="text-lg font-bold mb-3">Step 3：发票</h2>
-        <p class="text-sm text-gray-500 mb-3">仅支持 jpg/pdf，遇到 png 请先转换。每张发票需填物品名和金额，并勾选抬头已核对。</p>
+        <p class="text-sm text-gray-500 mb-3">仅支持 jpg/pdf，遇到 png 请先转换。每张发票需填物品名和金额，并勾选抬头已核对。金额可点「识别」自动读取（本地识别，需人工确认）。</p>
         <button @click="pickInvoices" class="mb-3 w-full border-2 border-dashed rounded px-3 py-4 text-gray-400 hover:border-blue-400 hover:text-blue-500">
           + 点击选择发票文件（可多选）
         </button>
@@ -635,13 +698,16 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
         <table v-else class="w-full border">
           <thead><tr class="bg-gray-100">
             <th class="border p-2 text-left">文件</th><th class="border p-2 text-left">物品名</th>
-            <th class="border p-2 w-28">金额(元)</th><th class="border p-2 w-24">抬头核对</th><th class="border p-2 w-10"></th>
+            <th class="border p-2 w-28">金额(元)</th><th class="border p-2 w-20">识别</th><th class="border p-2 w-24">抬头核对</th><th class="border p-2 w-10"></th>
           </tr></thead>
           <tbody>
             <tr v-for="inv in invoices" :key="inv.id">
               <td class="border p-2 text-xs text-gray-500 max-w-[200px] truncate" :title="inv.filePath">{{ inv.filePath.split(/[\\/]/).pop() }}</td>
               <td class="border p-2"><input v-model="inv.itemName" @change="saveInvoice(inv)" class="w-full text-sm" placeholder="物品名" /></td>
               <td class="border p-2"><input :value="(inv.amountCent / 100).toFixed(2)" @change="inv.amountCent = Math.round(parseFloat(($event.target as HTMLInputElement).value) * 100); saveInvoice(inv)" type="number" step="0.01" class="w-full text-sm" /></td>
+              <td class="border p-2 text-center">
+                <button @click="openOcr(inv)" class="text-blue-600 text-xs border border-blue-300 rounded px-2 py-0.5 hover:bg-blue-50">识别</button>
+              </td>
               <td class="border p-2 text-center"><input type="checkbox" v-model="inv.headChecked" @change="saveInvoice(inv)" /></td>
               <td class="border p-2 text-center"><button @click="removeInvoice(inv.id)" class="text-red-500">×</button></td>
             </tr>
@@ -879,6 +945,23 @@ watch(healthItems, (items) => healthStore.set(items), { immediate: true, deep: t
       <button v-if="step <= 6" @click="saveCurrent" class="px-4 py-2 bg-green-600 text-white rounded">💾 保存本步</button>
       <button @click="next" :disabled="step >= 10" class="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-30">下一步 →</button>
     </div>
+
+    <BudgetExtractDialog
+      v-if="budgetDialog"
+      :rows="budgetDialog.rows"
+      :file-name="budgetDialog.fileName"
+      :warnings="budgetDialog.warnings"
+      :existing-count="budgetDialog.existingCount"
+      @confirm="applyBudget"
+      @cancel="budgetDialog = null"
+    />
+    <InvoiceOcrDialog
+      v-if="ocrTarget"
+      :file-path="ocrTarget.filePath"
+      :item-name="ocrTarget.itemName"
+      @confirm="applyOcrAmount"
+      @cancel="ocrTarget = null"
+    />
   </div>
 </template>
 

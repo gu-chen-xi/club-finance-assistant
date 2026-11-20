@@ -32,3 +32,6 @@ data/
 
 # 本机快捷方式（指向本机构建产物，不入库）
 *.lnk
+
+# OCR 运行时资源（由 scripts/copy-ocr-assets.mjs 从 node_modules 复制）
+public/ocr/

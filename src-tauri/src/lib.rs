@@ -45,6 +45,29 @@ fn delete_files(paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// 读取任意文件并转成 base64（不引入第三方 crate，供前端渲染本地图片 / 解包 docx）
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("读取失败 {}: {}", path, e))?;
+    Ok(base64_encode(&bytes))
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARS[((n >> 18) & 63) as usize] as char);
+        out.push(CHARS[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { CHARS[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { CHARS[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
 /// 归档根目录：从 exe 所在位置向上找同时包含 src 和 src-tauri 的项目根目录，
 /// 在根目录下创建「归档」文件夹；找不到（如安装版）则退回「文档\社团财务报账归档」
 #[tauri::command]
@@ -138,7 +161,8 @@ pub fn run() {
             open_file,
             delete_files,
             archive_root,
-            create_unique_dir
+            create_unique_dir,
+            read_file_base64
         ])
         .setup(|app| {
             let _ = app;

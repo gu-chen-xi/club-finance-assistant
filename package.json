@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-ocr-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-ocr-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri"
@@ -13,7 +15,9 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-sql": "^2",
+    "@tesseract.js-data/eng": "^1.0.0",
     "echarts": "^5.5.0",
+    "tesseract.js": "^7.0.0",
     "vue": "^3.4.0",
     "vue-router": "^4.3.0"
   },
