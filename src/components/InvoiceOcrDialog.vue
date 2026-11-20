@@ -14,7 +14,7 @@ const emit = defineEmits<{
   cancel: [];
 }>();
 
-const nameInput = ref(props.itemName || "");
+const nameInput = ref("");
 
 const fileName = computed(() => props.filePath.split(/[\\/]/).pop() || props.filePath);
 const imgUrl = ref("");
